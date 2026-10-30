@@ -1,0 +1,2 @@
+# otaku-messenger
+پیام‌رسان اوتاکو
