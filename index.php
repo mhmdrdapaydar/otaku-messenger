@@ -730,6 +730,7 @@ usort($all_conversations, function($a, $b) {
                 </h3>
             </div>
             <div style="display:flex; gap:4px;">
+                <button onclick="openMessageSearch()" class="btn-icon" title="جستجو در پیام‌ها" aria-label="جستجو در پیام‌ها">🔍</button>
                 <button onclick="toggleNavVisibility()" class="btn-icon" title="مخفی/نمایش نوار">👁️</button>
                 <button onclick="blockUser(<?= $user_chat_id ?>)" class="btn-icon"><?= $i_blocked_him ? '🔓' : '🚫' ?></button>
             </div>
@@ -745,7 +746,7 @@ usort($all_conversations, function($a, $b) {
                 <input type="hidden" name="type" value="private">
                 <input type="hidden" name="receiver_id" value="<?= $user_chat_id ?>">
                 <div class="message-row">
-                    <input type="text" name="message" id="privateInput" placeholder="پیام..." autocomplete="off">
+                    <textarea name="message" id="privateInput" class="message-composer" rows="1" placeholder="پیام..." autocomplete="off"></textarea>
                     <button type="button" class="attach-btn" onclick="toggleAttachPanel('privateAttach')" title="افزودن لینک رسانه">🔗</button>
                     <button type="submit" class="send-btn" id="privateSendBtn">➤</button>
                 </div>
@@ -797,12 +798,25 @@ usort($all_conversations, function($a, $b) {
             function replyMessage(msgId, senderName, originalText) {
                 const input = document.getElementById('privateInput');
                 if (!input) return;
-                const replyTag = `[reply:${msgId}:${senderName}:${originalText}] `;
-                input.value = replyTag;
+                const replyTag = `[reply2:${encodeURIComponent(JSON.stringify({id: msgId, name: senderName, text: originalText}))}] `;
+                const draft = input.value.replace(/^\[reply2:[^\]]+\]\s*/, '');
+                input.value = replyTag + draft;
                 input.focus();
             }
             function formatMessage(rawText) {
-                const replyRegex = /^\[reply:(\d+):([^:]+):([^\]]+)\]\s*/;
+                const modernReply = rawText.match(/^\[reply2:([^\]]+)\]\s*/);
+                if (modernReply) {
+                    try {
+                        const payload = JSON.parse(decodeURIComponent(modernReply[1]));
+                        const rest = rawText.substring(modernReply[0].length);
+                        let html = `<div class="reply-block"><strong>${escapeHtml(payload.name || '')}</strong><br>${escapeHtml(payload.text || '')}</div>${escapeHtml(rest)}`;
+                        html = html.replace(/\b(https?:\/\/[^\s<>]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+                        html = html.replace(/@([a-zA-Z0-9_]+)/g, '<span class="mention" data-username="$1" onclick="resolveAndOpenChat(\'$1\')">@$1</span>');
+                        return html;
+                    } catch (error) {}
+                }
+
+                                    const replyRegex = /^\[reply:(\d+):([^:]+):([^\]]+)\]\s*/;
                 const match = rawText.match(replyRegex);
                 if (match) {
                     const repliedId = match[1];
@@ -856,7 +870,7 @@ usort($all_conversations, function($a, $b) {
                 ['👍','❤️','😂','😢','😡'].forEach(emoji => actionsHtml += `<button onclick="reactPrivate(${msg.id}, '${emoji}')">${emoji}</button>`);
                 actionsHtml += '</div>';
                 actionsHtml += `<button class="copy-btn" onclick="copyMessage(${msg.id})" title="کپی پیام">📋</button>`;
-                actionsHtml += `<button class="reply-btn" onclick="replyMessage(${msg.id}, '${escapeHtml(msg.sender_name).replace(/'/g, "\\'")}', '${escapeHtml(msg.message || '').replace(/'/g, "\\'")}')" title="پاسخ">↩️</button>`;
+                actionsHtml += `<button class="reply-btn" data-reply-id="${msg.id}" data-reply-name="${encodeURIComponent(msg.sender_name || '')}" data-reply-text="${encodeURIComponent(msg.message || '')}" title="پاسخ" aria-label="پاسخ به پیام">↩️</button>`;
                 if (isMine) {
                     actionsHtml += `<button class="edit-btn" onclick="editMessage(${msg.id}, 'private')">✏️</button>`;
                     actionsHtml += `<button class="delete-btn" onclick="deleteMsg(${msg.id}, 'private')">🗑️</button>`;
@@ -955,6 +969,20 @@ usort($all_conversations, function($a, $b) {
                 isLoadingOlderPrivate = false;
             }
 
+            window.jumpToMessage = async function(messageId) {
+                let message = privateContainer.querySelector(`.message[data-id="${messageId}"]`);
+                let pages = 0;
+                while (!message && !noMoreOlderPrivate && pages < 30) {
+                    await loadOlderPrivate();
+                    pages++;
+                    message = privateContainer.querySelector(`.message[data-id="${messageId}"]`);
+                }
+                if (!message) { alert('پیام در دسترس نیست یا دیگر در این گفتگو وجود ندارد.'); return; }
+                message.scrollIntoView({behavior:'smooth', block:'center'});
+                message.classList.add('message-highlight');
+                setTimeout(() => message.classList.remove('message-highlight'), 1800);
+            };
+
             privateContainer.addEventListener('scroll', () => {
                 if (privateContainer.scrollTop <= 50) loadOlderPrivate();
             });
@@ -979,6 +1007,7 @@ usort($all_conversations, function($a, $b) {
                     const result = await res.json();
                     if (result.success) {
                         document.getElementById('privateInput').value = '';
+                        document.getElementById('privateInput').style.height = '46px';
                         privateForm.querySelector('[name="file_url"]').value = '';
                         privateForm.querySelector('[name="file_description"]').value = '';
                         document.getElementById('privateAttach').classList.remove('active');
@@ -1032,6 +1061,7 @@ usort($all_conversations, function($a, $b) {
                 <h3><?= htmlspecialchars($group['name']) ?> <span style="font-size:0.8rem; color:var(--secondary-text);">(<?= $member_count ?> عضو)</span></h3>
             </div>
             <div style="display:flex; gap:4px;">
+                <button onclick="openMessageSearch()" class="btn-icon" title="جستجو در پیام‌ها" aria-label="جستجو در پیام‌ها">🔍</button>
                 <button onclick="toggleNavVisibility()" class="btn-icon" title="مخفی/نمایش نوار">👁️</button>
                 <?php if ($is_admin_base): ?>
                     <a href="group_settings.php?id=<?= $target_id ?>" class="btn-icon">⚙️</a>
@@ -1051,7 +1081,7 @@ usort($all_conversations, function($a, $b) {
                     <input type="hidden" name="type" value="group">
                     <input type="hidden" name="group_id" value="<?= $target_id ?>">
                     <div class="message-row">
-                        <input type="text" name="message" id="groupInput" placeholder="پیام..." autocomplete="off">
+                        <textarea name="message" id="groupInput" class="message-composer" rows="1" placeholder="پیام..." autocomplete="off"></textarea>
                         <button type="button" class="attach-btn" onclick="toggleAttachPanel('groupAttach')" title="افزودن لینک رسانه">🔗</button>
                         <button type="submit" class="send-btn" id="groupSendBtn">➤</button>
                     </div>
@@ -1101,12 +1131,25 @@ usort($all_conversations, function($a, $b) {
                 function replyMessage(msgId, senderName, originalText) {
                     const input = document.getElementById('groupInput');
                     if (!input) return;
-                    const replyTag = `[reply:${msgId}:${senderName}:${originalText}] `;
-                    input.value = replyTag;
+                    const replyTag = `[reply2:${encodeURIComponent(JSON.stringify({id: msgId, name: senderName, text: originalText}))}] `;
+                    const draft = input.value.replace(/^\[reply2:[^\]]+\]\s*/, '');
+                    input.value = replyTag + draft;
                     input.focus();
                 }
                 function formatMessage(rawText) {
-                    const replyRegex = /^\[reply:(\d+):([^:]+):([^\]]+)\]\s*/;
+                        const modernReply = rawText.match(/^\[reply2:([^\]]+)\]\s*/);
+                    if (modernReply) {
+                        try {
+                            const payload = JSON.parse(decodeURIComponent(modernReply[1]));
+                            const rest = rawText.substring(modernReply[0].length);
+                            let html = `<div class="reply-block"><strong>${escapeHtml(payload.name || '')}</strong><br>${escapeHtml(payload.text || '')}</div>${escapeHtml(rest)}`;
+                            html = html.replace(/\b(https?:\/\/[^\s<>]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+                            html = html.replace(/@([a-zA-Z0-9_]+)/g, '<span class="mention" data-username="$1" onclick="resolveAndOpenChat(\'$1\')">@$1</span>');
+                            return html;
+                        } catch (error) {}
+                    }
+
+                                    const replyRegex = /^\[reply:(\d+):([^:]+):([^\]]+)\]\s*/;
                     const match = rawText.match(replyRegex);
                     if (match) {
                         const repliedId = match[1];
@@ -1168,7 +1211,7 @@ usort($all_conversations, function($a, $b) {
                     ['👍','❤️','😂','😢','😡'].forEach(emoji => actionsHtml += `<button onclick="react(${msg.id}, '${emoji}')">${emoji}</button>`);
                     actionsHtml += '</div>';
                     actionsHtml += `<button class="copy-btn" onclick="copyMessage(${msg.id})" title="کپی پیام">📋</button>`;
-                    actionsHtml += `<button class="reply-btn" onclick="replyMessage(${msg.id}, '${escapeHtml(msg.sender_name).replace(/'/g, "\\'")}', '${escapeHtml(msg.message || '').replace(/'/g, "\\'")}')" title="پاسخ">↩️</button>`;
+                    actionsHtml += `<button class="reply-btn" data-reply-id="${msg.id}" data-reply-name="${encodeURIComponent(msg.sender_name || '')}" data-reply-text="${encodeURIComponent(msg.message || '')}" title="پاسخ" aria-label="پاسخ به پیام">↩️</button>`;
                     if (canEdit) actionsHtml += `<button class="edit-btn" onclick="editMessage(${msg.id}, 'group')">✏️</button>`;
                     if (isMine || isAdmin) actionsHtml += `<button class="delete-btn" onclick="deleteMsg(${msg.id}, 'group')">🗑️</button>`;
                     if (isAdmin) actionsHtml += `<button class="pin-btn" onclick="togglePin(${msg.id}, ${msg.is_pinned})">📌</button>`;
@@ -1267,6 +1310,20 @@ usort($all_conversations, function($a, $b) {
                     isLoadingOlderGroup = false;
                 }
 
+                window.jumpToMessage = async function(messageId) {
+                    let message = groupContainer.querySelector(`.message[data-id="${messageId}"]`);
+                    let pages = 0;
+                    while (!message && !noMoreOlderGroup && pages < 30) {
+                        await loadOlderGroup();
+                        pages++;
+                        message = groupContainer.querySelector(`.message[data-id="${messageId}"]`);
+                    }
+                    if (!message) { alert('پیام در دسترس نیست یا دیگر در این گفتگو وجود ندارد.'); return; }
+                    message.scrollIntoView({behavior:'smooth', block:'center'});
+                    message.classList.add('message-highlight');
+                    setTimeout(() => message.classList.remove('message-highlight'), 1800);
+                };
+
                 groupContainer.addEventListener('scroll', () => {
                     if (groupContainer.scrollTop <= 50) loadOlderGroup();
                 });
@@ -1303,6 +1360,7 @@ usort($all_conversations, function($a, $b) {
                         const result = await res.json();
                         if (result.success) {
                             document.getElementById('groupInput').value = '';
+                        document.getElementById('groupInput').style.height = '46px';
                             groupForm.querySelector('[name="file_url"]').value = '';
                             groupForm.querySelector('[name="file_description"]').value = '';
                             document.getElementById('groupAttach').classList.remove('active');
@@ -1343,6 +1401,19 @@ usort($all_conversations, function($a, $b) {
 <?php endif; ?>
 </div>
 
+<!-- جستجوی پیام‌ها در گفتگوی جاری -->
+<div id="messageSearchModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closeMessageSearch()">
+    <div class="modal message-search-modal" role="dialog" aria-modal="true" aria-labelledby="messageSearchTitle">
+        <div class="search-modal-heading">
+            <div><h3 id="messageSearchTitle">جستجو در گفتگو</h3><p>عبارت موردنظر را در پیام‌ها پیدا کنید.</p></div>
+            <button type="button" class="btn-icon" onclick="closeMessageSearch()" aria-label="بستن">×</button>
+        </div>
+        <input type="search" id="messageSearchInput" placeholder="حداقل دو نویسه بنویسید…" autocomplete="off" aria-label="جستجوی پیام">
+        <div id="messageSearchStatus" class="search-status" role="status" aria-live="polite">برای شروع جستجو تایپ کنید.</div>
+        <div id="messageSearchResults" class="message-search-results"></div>
+    </div>
+</div>
+
 <!-- مودال ویرایش -->
 <div id="editModal" class="modal-overlay" style="display:none;">
     <div class="modal">
@@ -1370,6 +1441,72 @@ usort($all_conversations, function($a, $b) {
 
 <script>
     const currentUserId = <?= $current_user_id ?>;
+    const messageSearchContext = {
+        type: <?= json_encode($page === 'chat' ? 'private' : 'group') ?>,
+        id: <?= (int)($page === 'chat' ? $user_chat_id : $target_id) ?>
+    };
+    let messageSearchTimer;
+    let messageSearchController;
+    function openMessageSearch() {
+        const modal = document.getElementById('messageSearchModal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        document.getElementById('messageSearchInput').focus();
+    }
+    function closeMessageSearch() {
+        document.getElementById('messageSearchModal').style.display = 'none';
+        if (messageSearchController) messageSearchController.abort();
+    }
+    async function runMessageSearch() {
+        const input = document.getElementById('messageSearchInput');
+        const status = document.getElementById('messageSearchStatus');
+        const results = document.getElementById('messageSearchResults');
+        const query = input.value.trim();
+        if (query.length < 2) {
+            status.textContent = 'برای جستجو دست‌کم دو نویسه وارد کنید.';
+            results.replaceChildren();
+            return;
+        }
+        if (messageSearchController) messageSearchController.abort();
+        messageSearchController = new AbortController();
+        status.textContent = 'در حال جستجو…';
+        results.replaceChildren();
+        try {
+            const params = new URLSearchParams({type: messageSearchContext.type, id: messageSearchContext.id, q: query});
+            const response = await fetch(`search_messages.php?${params}`, {signal: messageSearchController.signal});
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error('search failed');
+            if (!data.items.length) {
+                status.textContent = 'پیامی با این عبارت پیدا نشد.';
+                return;
+            }
+            status.textContent = `${data.items.length} نتیجه پیدا شد؛ برای رفتن به پیام انتخاب کنید.`;
+            data.items.forEach(item => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'message-search-result';
+                const text = document.createElement('span');
+                text.className = 'message-search-result-text';
+                text.textContent = item.message || item.file_description || 'پیام رسانه‌ای';
+                const meta = document.createElement('small');
+                const sentAt = String(item.sent_at || '');
+                const date = new Date(sentAt.replace(' ', 'T'));
+                meta.textContent = `${item.sender_name || 'کاربر'} · ${!sentAt || Number.isNaN(date.getTime()) ? sentAt : date.toLocaleString('fa-IR')}`;
+                button.append(text, meta);
+                button.addEventListener('click', async () => {
+                    closeMessageSearch();
+                    if (window.jumpToMessage) await window.jumpToMessage(item.id);
+                });
+                results.appendChild(button);
+            });
+        } catch (error) {
+            if (error.name !== 'AbortError') status.textContent = 'جستجو ناموفق بود؛ اتصال را بررسی کنید.';
+        }
+    }
+    document.getElementById('messageSearchInput').addEventListener('input', () => {
+        clearTimeout(messageSearchTimer);
+        messageSearchTimer = setTimeout(runMessageSearch, 250);
+    });
     function toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         const isOpen = sidebar.classList.toggle('open');
@@ -1381,7 +1518,34 @@ usort($all_conversations, function($a, $b) {
             document.body.classList.remove('sidebar-open');
         }
     }
-    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSidebar(); });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { closeSidebar(); closeMessageSearch(); }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && document.body.classList.contains('in-conversation')) {
+            event.preventDefault();
+            openMessageSearch();
+        }
+    });
+    document.addEventListener('click', event => {
+        const button = event.target.closest('.reply-btn');
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof replyMessage === 'function') {
+            try { replyMessage(button.dataset.replyId, decodeURIComponent(button.dataset.replyName || ''), decodeURIComponent(button.dataset.replyText || '')); }
+            catch (error) { replyMessage(button.dataset.replyId, '', ''); }
+        }
+    });
+    document.querySelectorAll('.message-composer').forEach(composer => {
+        const fitComposer = () => { composer.style.height = 'auto'; composer.style.height = `${Math.min(composer.scrollHeight, 150)}px`; };
+        composer.addEventListener('input', fitComposer);
+        composer.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                event.preventDefault();
+                composer.form.requestSubmit();
+            }
+        });
+        fitComposer();
+    });
     setInterval(() => { fetch('heartbeat.php'); }, 30000);
 
     async function updateUnreadCounts() {
