@@ -1,7 +1,6 @@
 <?php
 // mark_group_read.php
 require_once 'config.php';
-session_start();
 if (!isset($_SESSION['user_id'])) {
     http_response_code(403);
     exit;
@@ -11,6 +10,14 @@ $group_id = (int)($_POST['group_id'] ?? 0);
 
 if ($group_id <= 0) {
     echo json_encode(['success' => false]);
+    exit;
+}
+
+$membership = $pdo->prepare("SELECT 1 FROM group_channel_members WHERE group_id = ? AND user_id = ?");
+$membership->execute([$group_id, $user_id]);
+if (!$membership->fetchColumn()) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'عضو این گروه نیستید.']);
     exit;
 }
 

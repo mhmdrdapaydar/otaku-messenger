@@ -1,8 +1,22 @@
 <?php
 require_once 'config.php';
-if (!isset($_SESSION['user_id'])) exit;
+header('Content-Type: application/json; charset=utf-8');
+if (!isset($_SESSION['user_id'])) {
+    http_response_code(403);
+    echo json_encode([]);
+    exit;
+}
 $gid = (int)($_GET['id'] ?? 0);
-$uid = $_SESSION['user_id'];
+$uid = (int)$_SESSION['user_id'];
+$access = $pdo->prepare("SELECT 1 FROM groups_channels g
+                         LEFT JOIN group_channel_members m ON m.group_id = g.id AND m.user_id = ?
+                         WHERE g.id = ? AND (m.user_id IS NOT NULL OR g.created_by = ?)");
+$access->execute([$uid, $gid, $uid]);
+if (!$access->fetchColumn()) {
+    http_response_code(403);
+    echo json_encode([]);
+    exit;
+}
 
 $after = isset($_GET['after']) ? (int)$_GET['after'] : null;
 $before = isset($_GET['before']) ? (int)$_GET['before'] : null;

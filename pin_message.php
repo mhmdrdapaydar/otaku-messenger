@@ -1,6 +1,5 @@
 <?php
 require_once 'config.php';
-session_start();
 if (!isset($_SESSION['user_id'])) exit;
 $user_id = $_SESSION['user_id'];
 $message_id = (int)$_POST['message_id'];

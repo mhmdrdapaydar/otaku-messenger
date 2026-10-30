@@ -76,7 +76,7 @@ if (isset($_GET['action'])) {
 
         $stmt = $pdo->prepare("SELECT u.id, COUNT(*) as cnt FROM private_messages pm
                                JOIN users u ON u.id = pm.sender_id
-                               WHERE pm.receiver_id = ? AND pm.is_read = 0
+                               WHERE pm.receiver_id = ? AND pm.is_read = 0 AND pm.deleted_at IS NULL
                                GROUP BY u.id");
         $stmt->execute([$current_user_id]);
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -87,7 +87,7 @@ if (isset($_GET['action'])) {
                                FROM group_channel_messages gm
                                JOIN groups_channels g ON gm.group_id = g.id
                                JOIN group_channel_members m ON m.group_id = g.id AND m.user_id = ?
-                               WHERE gm.sender_id != ? AND gm.id > COALESCE(m.last_read_message_id, 0)
+                               WHERE gm.sender_id != ? AND gm.deleted_at IS NULL AND gm.id > COALESCE(m.last_read_message_id, 0)
                                GROUP BY g.id");
         $stmt->execute([$current_user_id, $current_user_id]);
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -109,12 +109,18 @@ if (isset($_GET['action'])) {
             exit;
         }
 
-        $ids = array_map('intval', $messageIds);
+        $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', $messageIds), static fn($id) => $id > 0))), 0, 100);
+        if (!$ids) { echo json_encode(['deleted_ids' => []]); exit; }
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
 
         if ($type === 'private') {
-            $sql = "SELECT id FROM private_messages WHERE id IN ($placeholders) AND deleted_at IS NOT NULL";
+            $sql = "SELECT id FROM private_messages WHERE id IN ($placeholders) AND deleted_at IS NOT NULL
+                    AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))";
+            array_push($ids, $current_user_id, $current_user_id, $current_user_id, $current_user_id);
         } else {
+            $membership = $pdo->prepare("SELECT 1 FROM group_channel_members WHERE group_id = ? AND user_id = ?");
+            $membership->execute([$groupId, $current_user_id]);
+            if (!$membership->fetchColumn()) { http_response_code(403); echo json_encode(['deleted_ids' => []]); exit; }
             $sql = "SELECT id FROM group_channel_messages WHERE id IN ($placeholders) AND deleted_at IS NOT NULL AND group_id = ?";
             $ids[] = $groupId;
         }
@@ -155,9 +161,9 @@ function getUserInfo($pdo, $user_id) {
 }
 $current_user = getUserInfo($pdo, $current_user_id);
 
-$page = $_GET['page'] ?? 'home';
-$target_id = $_GET['id'] ?? null;
-$user_chat_id = $_GET['user'] ?? null;
+$page = is_string($_GET['page'] ?? null) ? $_GET['page'] : 'home';
+$target_id = isset($_GET['id']) ? (int)$_GET['id'] : null;
+$user_chat_id = isset($_GET['user']) ? (int)$_GET['user'] : null;
 
 if ($page == 'group' && isset($_GET['slug']) && !isset($_GET['id'])) {
     $slug = $_GET['slug'];
@@ -182,7 +188,7 @@ $private_chats = $pdo->prepare("
          ORDER BY sent_at DESC LIMIT 1) as last_msg,
         (SELECT MAX(sent_at) FROM private_messages
          WHERE (sender_id = u.id AND receiver_id = :uid3) OR (sender_id = :uid4 AND receiver_id = u.id)) as last_time,
-        (SELECT COUNT(*) FROM private_messages WHERE sender_id = u.id AND receiver_id = :uid5 AND is_read = 0) as unread
+        (SELECT COUNT(*) FROM private_messages WHERE sender_id = u.id AND receiver_id = :uid5 AND is_read = 0 AND deleted_at IS NULL) as unread
     FROM users u
     WHERE u.id IN (
         SELECT DISTINCT sender_id FROM private_messages WHERE receiver_id = :uid6
@@ -580,7 +586,7 @@ usort($all_conversations, function($a, $b) {
         <?php
         $chats_sidebar = $pdo->prepare("
             SELECT u.id, u.display_name, u.first_name, u.last_name, u.avatar_url, u.is_online, u.last_seen,
-                (SELECT COUNT(*) FROM private_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread,
+                (SELECT COUNT(*) FROM private_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0 AND deleted_at IS NULL) as unread,
                 (SELECT message FROM private_messages WHERE ((sender_id = u.id AND receiver_id = ?) OR (sender_id = ? AND receiver_id = u.id)) ORDER BY sent_at DESC LIMIT 1) as last_msg
             FROM users u
             WHERE u.id IN (SELECT DISTINCT sender_id FROM private_messages WHERE receiver_id = ? UNION SELECT DISTINCT receiver_id FROM private_messages WHERE sender_id = ?) AND u.id != ?
@@ -607,7 +613,7 @@ usort($all_conversations, function($a, $b) {
         <?php
         $groups_sidebar = $pdo->prepare("
             SELECT g.*, 
-                (SELECT COUNT(*) FROM group_channel_messages gm WHERE gm.group_id = g.id AND gm.id > COALESCE(m.last_read_message_id, 0) AND gm.sender_id != ?) as unread,
+                (SELECT COUNT(*) FROM group_channel_messages gm WHERE gm.group_id = g.id AND gm.deleted_at IS NULL AND gm.id > COALESCE(m.last_read_message_id, 0) AND gm.sender_id != ?) as unread,
                 (SELECT message FROM group_channel_messages gm2 WHERE gm2.group_id = g.id ORDER BY sent_at DESC LIMIT 1) as last_msg
             FROM groups_channels g JOIN group_channel_members m ON g.id = m.group_id AND m.user_id = ?
             ORDER BY (SELECT MAX(sent_at) FROM group_channel_messages WHERE group_id = g.id) DESC
@@ -959,7 +965,7 @@ usort($all_conversations, function($a, $b) {
             async function reactPrivate(messageId, emoji) {
                 const currentReaction = document.querySelector(`.message[data-id="${messageId}"] .user-reaction`)?.innerText;
                 const action = (currentReaction === emoji) ? 'remove' : 'add';
-                await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${emoji}&action=${action}` });
+                await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${emoji}&action=${action}&type=private` });
                 loadInitialPrivate();
             }
             const privateForm = document.getElementById('privateForm');
@@ -1271,7 +1277,7 @@ usort($all_conversations, function($a, $b) {
                 async function react(messageId, emoji) {
                     const currentReaction = document.querySelector(`.message[data-id="${messageId}"] .user-reaction`)?.innerText;
                     const action = (currentReaction === emoji) ? 'remove' : 'add';
-                    await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${emoji}&action=${action}` });
+                    await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${emoji}&action=${action}&type=group` });
                     loadInitialGroup();
                 }
                 async function togglePin(messageId, isPinned) {

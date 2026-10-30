@@ -1,6 +1,5 @@
 <?php
 require_once 'config.php';
-session_start();
 if (!isset($_SESSION['user_id'])) exit;
 $uid = $_SESSION['user_id'];
 $q = trim($_GET['q'] ?? '');

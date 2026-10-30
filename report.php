@@ -1,6 +1,5 @@
 <?php
 require_once 'config.php';
-session_start();
 if (!isset($_SESSION['user_id'])) exit;
 $reporter = $_SESSION['user_id'];
 $target_type = $_POST['target_type'] ?? 'message';

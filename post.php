@@ -1,6 +1,5 @@
 <?php
 require_once 'config.php';
-session_start();
 
 // ---------- فقط کاربران لاگین شده ----------
 if (!isset($_SESSION['user_id'])) {

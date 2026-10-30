@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once 'media_links.php';
 header('Content-Type: application/json; charset=utf-8');
 if (!isset($_SESSION['user_id'])) {
     http_response_code(403); exit;
@@ -48,24 +49,9 @@ if ($messageLength > 10000 || $descriptionLength > 500) {
     exit;
 }
 
-// اگر فایل ارسال شده، دامنه رو بررسی کن
-if ($file_url !== '') {
-    $parsed = filter_var($file_url, FILTER_VALIDATE_URL) ? parse_url($file_url) : false;
-    if (!$parsed || strtolower($parsed['scheme'] ?? '') !== 'https'
-        || empty($parsed['host']) || isset($parsed['user']) || isset($parsed['pass'])) {
-        echo json_encode(['success'=>false, 'error'=>'لینک فایل باید یک نشانی HTTPS معتبر باشد.']);
-        exit;
-    }
-    $domain = strtolower(rtrim($parsed['host'], '.'));
-    if (str_starts_with($domain, 'www.')) {
-        $domain = substr($domain, 4);
-    }
-    $stmtDomain = $pdo->prepare("SELECT 1 FROM allowed_domains WHERE domain = ?");
-    $stmtDomain->execute([$domain]);
-    if (!$stmtDomain->fetchColumn()) {
-        echo json_encode(['success'=>false, 'error'=>'دامنه فایل مجاز نیست.']);
-        exit;
-    }
+if (!isAllowedMediaLink($pdo, $file_url)) {
+    echo json_encode(['success' => false, 'error' => 'لینک رسانه باید HTTPS باشد و دامنه آن مجاز باشد.']);
+    exit;
 }
 
 // اگر نه پیام داریم نه فایل، خطا
@@ -75,12 +61,22 @@ if ($message === '' && $file_url === '') {
 }
 
 if ($type === 'private') {
-    $receiver = (int)$_POST['receiver_id'];
-    // بررسی بلاک
-    $blocked = $pdo->prepare("SELECT 1 FROM blocked_users WHERE blocker_id = ? AND blocked_id = ?");
-    $blocked->execute([$receiver, $user_id]);
+    $receiver = (int)($_POST['receiver_id'] ?? 0);
+    if ($receiver < 1 || $receiver === (int)$user_id) {
+        echo json_encode(['success' => false, 'error' => 'گیرنده‌ی پیام نامعتبر است.']);
+        exit;
+    }
+    $recipientExists = $pdo->prepare('SELECT 1 FROM users WHERE id = ?');
+    $recipientExists->execute([$receiver]);
+    if (!$recipientExists->fetchColumn()) {
+        echo json_encode(['success' => false, 'error' => 'کاربر مقصد یافت نشد.']);
+        exit;
+    }
+    // اگر هر یک از دو طرف دیگری را مسدود کرده باشد، گفت‌وگو متوقف می‌شود.
+    $blocked = $pdo->prepare("SELECT 1 FROM blocked_users WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)");
+    $blocked->execute([$receiver, $user_id, $user_id, $receiver]);
     if ($blocked->fetchColumn()) {
-        echo json_encode(['success'=>false, 'error'=>'شما توسط این کاربر مسدود شده‌اید.']);
+        echo json_encode(['success'=>false, 'error'=>'امکان ارسال پیام به این کاربر وجود ندارد.']);
         exit;
     }
 
@@ -94,7 +90,11 @@ if ($type === 'private') {
     exit;
 
 } elseif ($type === 'group') {
-    $group_id = (int)$_POST['group_id'];
+    $group_id = (int)($_POST['group_id'] ?? 0);
+    if ($group_id < 1) {
+        echo json_encode(['success' => false, 'error' => 'گروه نامعتبر است.']);
+        exit;
+    }
 
     // وجود گروه
     $group = $pdo->prepare("SELECT created_by, type, name FROM groups_channels WHERE id = ?");
