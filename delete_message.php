@@ -27,11 +27,11 @@ if ($type === 'private') {
     if (!$msg) { echo json_encode(['success'=>false]); exit; }
 
     $is_sender = ($msg['sender_id'] == $user_id);                      // خودش فرستاده
-    $is_owner = ($msg['created_by'] == $user_id);                     // مالک گروه
+    $is_owner = ($msg['created_by'] == $user_id || $msg['role'] === 'owner'); // مالک گروه
     $is_admin = in_array($msg['role'], ['owner', 'admin']);           // نقش او در گروه
 
     // 1. اگر خودش فرستنده باشد، بدون هیچ شرطی مجاز است
-    if ($is_sender) {
+    if ($is_sender || $is_owner) {
         // مجاز
     }
     // 2. اگر مدیر است (و فرستنده نیست) باید مجوز can_delete_messages داشته باشد

@@ -185,15 +185,17 @@ $private_chats = $pdo->prepare("
     SELECT u.id, u.display_name, u.first_name, u.last_name, u.avatar_url, u.is_online, u.last_seen,
         (SELECT message FROM private_messages
          WHERE ((sender_id = u.id AND receiver_id = :uid) OR (sender_id = :uid2 AND receiver_id = u.id))
+           AND deleted_at IS NULL
          ORDER BY sent_at DESC LIMIT 1) as last_msg,
         (SELECT MAX(sent_at) FROM private_messages
-         WHERE (sender_id = u.id AND receiver_id = :uid3) OR (sender_id = :uid4 AND receiver_id = u.id)) as last_time,
+         WHERE ((sender_id = u.id AND receiver_id = :uid3) OR (sender_id = :uid4 AND receiver_id = u.id))
+           AND deleted_at IS NULL) as last_time,
         (SELECT COUNT(*) FROM private_messages WHERE sender_id = u.id AND receiver_id = :uid5 AND is_read = 0 AND deleted_at IS NULL) as unread
     FROM users u
     WHERE u.id IN (
-        SELECT DISTINCT sender_id FROM private_messages WHERE receiver_id = :uid6
+        SELECT DISTINCT sender_id FROM private_messages WHERE receiver_id = :uid6 AND deleted_at IS NULL
         UNION
-        SELECT DISTINCT receiver_id FROM private_messages WHERE sender_id = :uid7
+        SELECT DISTINCT receiver_id FROM private_messages WHERE sender_id = :uid7 AND deleted_at IS NULL
     ) AND u.id != :uid8
 ");
 $private_chats->execute([
@@ -221,10 +223,10 @@ while ($chat = $private_chats->fetch(PDO::FETCH_ASSOC)) {
 // 2. گروه‌ها و کانال‌ها
 $group_convs = $pdo->prepare("
     SELECT g.id, g.name, g.type, g.avatar_url, g.slug,
-        (SELECT message FROM group_channel_messages WHERE group_id = g.id ORDER BY sent_at DESC LIMIT 1) as last_msg,
-        (SELECT MAX(sent_at) FROM group_channel_messages WHERE group_id = g.id) as last_time,
+        (SELECT message FROM group_channel_messages WHERE group_id = g.id AND deleted_at IS NULL ORDER BY sent_at DESC LIMIT 1) as last_msg,
+        (SELECT MAX(sent_at) FROM group_channel_messages WHERE group_id = g.id AND deleted_at IS NULL) as last_time,
         (SELECT COUNT(*) FROM group_channel_messages gm
-         WHERE gm.group_id = g.id AND gm.id > COALESCE(m.last_read_message_id, 0) AND gm.sender_id != :uid) as unread
+         WHERE gm.group_id = g.id AND gm.deleted_at IS NULL AND gm.id > COALESCE(m.last_read_message_id, 0) AND gm.sender_id != :uid) as unread
     FROM groups_channels g
     JOIN group_channel_members m ON g.id = m.group_id AND m.user_id = :uid2
 ");
@@ -233,6 +235,7 @@ while ($g = $group_convs->fetch(PDO::FETCH_ASSOC)) {
     $avatar_icon = $g['type'] == 'channel' ? '📢' : '👥';
     $all_conversations[] = [
         'type' => 'group',
+        'kind' => $g['type'],
         'id' => $g['id'],
         'name' => $g['name'],
         'avatar' => $avatar_icon,
@@ -587,10 +590,10 @@ usort($all_conversations, function($a, $b) {
         $chats_sidebar = $pdo->prepare("
             SELECT u.id, u.display_name, u.first_name, u.last_name, u.avatar_url, u.is_online, u.last_seen,
                 (SELECT COUNT(*) FROM private_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0 AND deleted_at IS NULL) as unread,
-                (SELECT message FROM private_messages WHERE ((sender_id = u.id AND receiver_id = ?) OR (sender_id = ? AND receiver_id = u.id)) ORDER BY sent_at DESC LIMIT 1) as last_msg
+                (SELECT message FROM private_messages WHERE ((sender_id = u.id AND receiver_id = ?) OR (sender_id = ? AND receiver_id = u.id)) AND deleted_at IS NULL ORDER BY sent_at DESC LIMIT 1) as last_msg
             FROM users u
-            WHERE u.id IN (SELECT DISTINCT sender_id FROM private_messages WHERE receiver_id = ? UNION SELECT DISTINCT receiver_id FROM private_messages WHERE sender_id = ?) AND u.id != ?
-            ORDER BY (SELECT MAX(sent_at) FROM private_messages WHERE (sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id)) DESC
+            WHERE u.id IN (SELECT DISTINCT sender_id FROM private_messages WHERE receiver_id = ? AND deleted_at IS NULL UNION SELECT DISTINCT receiver_id FROM private_messages WHERE sender_id = ? AND deleted_at IS NULL) AND u.id != ?
+            ORDER BY (SELECT MAX(sent_at) FROM private_messages WHERE ((sender_id=u.id AND receiver_id=?) OR (sender_id=? AND receiver_id=u.id)) AND deleted_at IS NULL) DESC
         ");
         $chats_sidebar->execute([$current_user_id, $current_user_id, $current_user_id, $current_user_id, $current_user_id, $current_user_id, $current_user_id, $current_user_id]);
         while ($chat = $chats_sidebar->fetch(PDO::FETCH_ASSOC)):
@@ -614,9 +617,9 @@ usort($all_conversations, function($a, $b) {
         $groups_sidebar = $pdo->prepare("
             SELECT g.*, 
                 (SELECT COUNT(*) FROM group_channel_messages gm WHERE gm.group_id = g.id AND gm.deleted_at IS NULL AND gm.id > COALESCE(m.last_read_message_id, 0) AND gm.sender_id != ?) as unread,
-                (SELECT message FROM group_channel_messages gm2 WHERE gm2.group_id = g.id ORDER BY sent_at DESC LIMIT 1) as last_msg
+                (SELECT message FROM group_channel_messages gm2 WHERE gm2.group_id = g.id AND gm2.deleted_at IS NULL ORDER BY sent_at DESC LIMIT 1) as last_msg
             FROM groups_channels g JOIN group_channel_members m ON g.id = m.group_id AND m.user_id = ?
-            ORDER BY (SELECT MAX(sent_at) FROM group_channel_messages WHERE group_id = g.id) DESC
+            ORDER BY (SELECT MAX(sent_at) FROM group_channel_messages WHERE group_id = g.id AND deleted_at IS NULL) DESC
         ");
         $groups_sidebar->execute([$current_user_id, $current_user_id]);
         while ($g = $groups_sidebar->fetch(PDO::FETCH_ASSOC)):
@@ -689,7 +692,7 @@ usort($all_conversations, function($a, $b) {
                             <?php if ($conv['type'] == 'private' && $conv['is_online']): ?><span class="online-dot"></span><?php elseif ($conv['type'] == 'private'): ?><span class="online-dot offline-dot"></span><?php endif; ?>
                             <span class="unread-badge" data-chat-type="<?= $conv['type'] ?>" data-chat-id="<?= $conv['id'] ?>" style="<?= $conv['unread'] > 0 ? '' : 'display:none;' ?>"><?= $conv['unread'] ?></span>
                         </div>
-                        <div class="chat-preview"><?= $conv['last_msg'] ? htmlspecialchars(mb_substr($conv['last_msg'], 0, 35)) : ($conv['type'] == 'group' ? ($conv['type']=='channel'?'کانال':'گروه') : 'گفتگوی خصوصی') ?></div>
+                        <div class="chat-preview"><?= $conv['last_msg'] ? htmlspecialchars(mb_substr($conv['last_msg'], 0, 35)) : ($conv['type'] == 'group' ? (($conv['kind'] ?? '') === 'channel' ? 'کانال' : 'گروه') : 'گفتگوی خصوصی') ?></div>
                     </div>
                 </a>
             <?php endforeach; ?>
@@ -732,13 +735,15 @@ usort($all_conversations, function($a, $b) {
             <div style="display:flex; gap:4px;">
                 <button onclick="openMessageSearch()" class="btn-icon" title="جستجو در پیام‌ها" aria-label="جستجو در پیام‌ها">🔍</button>
                 <button onclick="toggleNavVisibility()" class="btn-icon" title="مخفی/نمایش نوار">👁️</button>
-                <button onclick="blockUser(<?= $user_chat_id ?>)" class="btn-icon"><?= $i_blocked_him ? '🔓' : '🚫' ?></button>
+                <button onclick="blockUser(<?= $user_chat_id ?>, <?= $i_blocked_him ? 'true' : 'false' ?>)" class="btn-icon"><?= $i_blocked_him ? '🔓' : '🚫' ?></button>
             </div>
         </div>
         <div class="messages-container" id="privateMessages"></div>
 
         <?php if ($is_blocked): ?>
             <div class="notice-bar">⛔ شما توسط این کاربر مسدود شده‌اید.</div>
+        <?php elseif ($i_blocked_him): ?>
+            <div class="notice-bar">🚫 این کاربر را مسدود کرده‌اید؛ برای ارسال پیام، ابتدا مسدودیت را بردارید.</div>
         <?php elseif (!$can_send_private): ?>
             <div class="notice-bar">⛔ شما اجازه ارسال پیام خصوصی ندارید.</div>
         <?php else: ?>
@@ -861,12 +866,12 @@ usort($all_conversations, function($a, $b) {
                 if (!isMine) contentHtml += `<div class="sender">${escapeHtml(msg.sender_name)}</div>`;
                 if (msg.file_url) contentHtml += renderFileAttachment(msg.file_url, msg.file_description);
                 contentHtml += formatMessage(msg.message || '');
-                if (msg.all_emojis && msg.all_emojis.length) contentHtml += `<div class="reactions-display">${msg.all_emojis.join(' ')}</div>`;
-                contentHtml += `<div class="time">${msg.sent_at}</div>`;
+                if (msg.all_emojis && msg.all_emojis.length) contentHtml += `<div class="reactions-display">${msg.all_emojis.map(escapeHtml).join(' ')}</div>`;
+                contentHtml += `<div class="time">${escapeHtml(msg.sent_at || '')}</div>`;
                 div.innerHTML = `<div class="message-content">${contentHtml}</div>`;
                 let actionsHtml = '<div class="message-actions">';
                 actionsHtml += '<div class="reactions">';
-                if (msg.user_emoji) actionsHtml += `<span class="user-reaction">${msg.user_emoji}</span>`;
+                if (msg.user_emoji) actionsHtml += `<span class="user-reaction">${escapeHtml(msg.user_emoji)}</span>`;
                 ['👍','❤️','😂','😢','😡'].forEach(emoji => actionsHtml += `<button onclick="reactPrivate(${msg.id}, '${emoji}')">${emoji}</button>`);
                 actionsHtml += '</div>';
                 actionsHtml += `<button class="copy-btn" onclick="copyMessage(${msg.id})" title="کپی پیام">📋</button>`;
@@ -951,29 +956,35 @@ usort($all_conversations, function($a, $b) {
             }
 
             async function loadOlderPrivate() {
-                if (!oldestPrivateMsgId || isLoadingOlderPrivate || noMoreOlderPrivate) return;
+                if (!oldestPrivateMsgId || isLoadingOlderPrivate || noMoreOlderPrivate) return false;
                 isLoadingOlderPrivate = true;
-                const res = await fetch(`load_private.php?user=${chatUserId}&before=${oldestPrivateMsgId}`);
-                const messages = await res.json();
-                if (messages.length === 0) {
-                    noMoreOlderPrivate = true;
+                try {
+                    const res = await fetch(`load_private.php?user=${chatUserId}&before=${oldestPrivateMsgId}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const messages = await res.json();
+                    if (messages.length === 0) {
+                        noMoreOlderPrivate = true;
+                        return false;
+                    }
+                    const previousHeight = privateContainer.scrollHeight;
+                    appendPrivateMessages(messages, true);
+                    updatePrivateCounters(messages);
+                    if (messages.length < 50) noMoreOlderPrivate = true;
+                    privateContainer.scrollTop += privateContainer.scrollHeight - previousHeight;
+                    return true;
+                } catch (error) {
+                    console.error('Could not load older private messages', error);
+                    return false;
+                } finally {
                     isLoadingOlderPrivate = false;
-                    return;
                 }
-                const previousHeight = privateContainer.scrollHeight;
-                appendPrivateMessages(messages, true);
-                updatePrivateCounters(messages);
-                if (messages.length < 50) noMoreOlderPrivate = true;
-                const newHeight = privateContainer.scrollHeight;
-                privateContainer.scrollTop += newHeight - previousHeight;
-                isLoadingOlderPrivate = false;
             }
 
             window.jumpToMessage = async function(messageId) {
                 let message = privateContainer.querySelector(`.message[data-id="${messageId}"]`);
                 let pages = 0;
                 while (!message && !noMoreOlderPrivate && pages < 30) {
-                    await loadOlderPrivate();
+                    if (!await loadOlderPrivate()) break;
                     pages++;
                     message = privateContainer.querySelector(`.message[data-id="${messageId}"]`);
                 }
@@ -993,8 +1004,12 @@ usort($all_conversations, function($a, $b) {
             async function reactPrivate(messageId, emoji) {
                 const currentReaction = document.querySelector(`.message[data-id="${messageId}"] .user-reaction`)?.innerText;
                 const action = (currentReaction === emoji) ? 'remove' : 'add';
-                await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${emoji}&action=${action}&type=private` });
-                loadInitialPrivate();
+                try {
+                    const response = await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${encodeURIComponent(emoji)}&action=${action}&type=private` });
+                    const result = await response.json();
+                    if (!result.success) { alert(result.error || 'ثبت واکنش ناموفق بود.'); return; }
+                    await loadInitialPrivate();
+                } catch (error) { alert('ثبت واکنش انجام نشد؛ اتصال را بررسی کنید.'); }
             }
             const privateForm = document.getElementById('privateForm');
             if (privateForm) privateForm.addEventListener('submit', async e => {
@@ -1037,13 +1052,27 @@ usort($all_conversations, function($a, $b) {
         $role = $member['role'] ?? 'guest';
         $is_admin_base = ($role == 'owner' || $role == 'admin' || $group['created_by'] == $current_user_id);
         $is_owner = ($group['created_by'] == $current_user_id);
+        $group_permissions = [];
+        if ($member && $role === 'admin') {
+            $permissionStmt = $pdo->prepare("SELECT can_edit_messages, can_delete_messages, can_pin_message, can_send_message FROM admin_permissions WHERE member_id = ?");
+            $permissionStmt->execute([$member['id']]);
+            $group_permissions = $permissionStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        }
+        $is_group_owner = $is_owner || $role === 'owner';
+        $can_edit_group_messages = $is_group_owner || !empty($group_permissions['can_edit_messages']);
+        $can_delete_group_messages = $is_group_owner || !empty($group_permissions['can_delete_messages']);
+        $can_pin_group_messages = $is_group_owner || !empty($group_permissions['can_pin_message']);
 
         if ($isMuted) {
             $can_send = false;
         } elseif ($isMessageBanned) {
             $can_send = $is_owner;
+        } elseif ($is_owner || $role === 'owner') {
+            $can_send = true;
+        } elseif ($role === 'admin') {
+            $can_send = !empty($group_permissions['can_send_message']);
         } else {
-            $can_send = $is_admin_base ? true : (($group['type']=='group' && $is_member && $member['can_send_message']));
+            $can_send = ($group['type'] === 'group' && $is_member && !empty($member['can_send_message']));
         }
 
         $cnt_stmt = $pdo->prepare("SELECT COUNT(*) FROM group_channel_members WHERE group_id = ?");
@@ -1095,8 +1124,6 @@ usort($all_conversations, function($a, $b) {
 
             <script>
                 const groupId = <?= $target_id ?>;
-                const isAdmin = <?= $is_admin_base ? 'true' : 'false' ?>;
-                const groupType = '<?= $group['type'] ?>';
                 function isImageUrl(url) { return /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url); }
                 function renderFileAttachment(fileUrl, fileDesc) {
                     let safeUrl;
@@ -1183,7 +1210,7 @@ usort($all_conversations, function($a, $b) {
 
                 function createGroupMessageElement(msg) {
                     const isMine = msg.sender_id == <?= $current_user_id ?>;
-                    const canEdit = isMine || (isAdmin && groupType === 'channel');
+                    const canEdit = isMine || <?= $can_edit_group_messages ? 'true' : 'false' ?>;
                     const div = document.createElement('div');
                     div.className = `message ${isMine ? 'message-sent' : 'message-received'}`;
                     div.setAttribute('data-id', msg.id);
@@ -1201,20 +1228,20 @@ usort($all_conversations, function($a, $b) {
                     }
                     if (msg.file_url) contentHtml += renderFileAttachment(msg.file_url, msg.file_description);
                     contentHtml += formatMessage(msg.message || '');
-                    if (msg.all_emojis && msg.all_emojis.length) contentHtml += `<div class="reactions-display">${msg.all_emojis.join(' ')}</div>`;
-                    contentHtml += `<div class="time">${msg.sent_at}</div>`;
+                    if (msg.all_emojis && msg.all_emojis.length) contentHtml += `<div class="reactions-display">${msg.all_emojis.map(escapeHtml).join(' ')}</div>`;
+                    contentHtml += `<div class="time">${escapeHtml(msg.sent_at || '')}</div>`;
                     if (msg.is_pinned) contentHtml += ' <span>📌</span>';
                     div.innerHTML = `<div class="message-content">${contentHtml}</div>`;
                     let actionsHtml = '<div class="message-actions">';
                     actionsHtml += '<div class="reactions">';
-                    if (msg.user_emoji) actionsHtml += `<span class="user-reaction">${msg.user_emoji}</span>`;
+                    if (msg.user_emoji) actionsHtml += `<span class="user-reaction">${escapeHtml(msg.user_emoji)}</span>`;
                     ['👍','❤️','😂','😢','😡'].forEach(emoji => actionsHtml += `<button onclick="react(${msg.id}, '${emoji}')">${emoji}</button>`);
                     actionsHtml += '</div>';
                     actionsHtml += `<button class="copy-btn" onclick="copyMessage(${msg.id})" title="کپی پیام">📋</button>`;
                     actionsHtml += `<button class="reply-btn" data-reply-id="${msg.id}" data-reply-name="${encodeURIComponent(msg.sender_name || '')}" data-reply-text="${encodeURIComponent(msg.message || '')}" title="پاسخ" aria-label="پاسخ به پیام">↩️</button>`;
                     if (canEdit) actionsHtml += `<button class="edit-btn" onclick="editMessage(${msg.id}, 'group')">✏️</button>`;
-                    if (isMine || isAdmin) actionsHtml += `<button class="delete-btn" onclick="deleteMsg(${msg.id}, 'group')">🗑️</button>`;
-                    if (isAdmin) actionsHtml += `<button class="pin-btn" onclick="togglePin(${msg.id}, ${msg.is_pinned})">📌</button>`;
+                    if (isMine || <?= $can_delete_group_messages ? 'true' : 'false' ?>) actionsHtml += `<button class="delete-btn" onclick="deleteMsg(${msg.id}, 'group')">🗑️</button>`;
+                    if (<?= $can_pin_group_messages ? 'true' : 'false' ?>) actionsHtml += `<button class="pin-btn" onclick="togglePin(${msg.id}, ${msg.is_pinned})">📌</button>`;
                     actionsHtml += `<button class="report-btn" onclick="reportMessage(${msg.id}, 'message')">⚠️</button>`;
                     actionsHtml += '</div>';
                     div.innerHTML += actionsHtml;
@@ -1292,29 +1319,35 @@ usort($all_conversations, function($a, $b) {
                 }
 
                 async function loadOlderGroup() {
-                    if (!oldestGroupMsgId || isLoadingOlderGroup || noMoreOlderGroup) return;
+                    if (!oldestGroupMsgId || isLoadingOlderGroup || noMoreOlderGroup) return false;
                     isLoadingOlderGroup = true;
-                    const res = await fetch(`load_group.php?id=${groupId}&before=${oldestGroupMsgId}`);
-                    const messages = await res.json();
-                    if (messages.length === 0) {
-                        noMoreOlderGroup = true;
+                    try {
+                        const res = await fetch(`load_group.php?id=${groupId}&before=${oldestGroupMsgId}`);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        const messages = await res.json();
+                        if (messages.length === 0) {
+                            noMoreOlderGroup = true;
+                            return false;
+                        }
+                        const previousHeight = groupContainer.scrollHeight;
+                        appendGroupMessages(messages, true);
+                        updateGroupCounters(messages);
+                        if (messages.length < 50) noMoreOlderGroup = true;
+                        groupContainer.scrollTop += groupContainer.scrollHeight - previousHeight;
+                        return true;
+                    } catch (error) {
+                        console.error('Could not load older group messages', error);
+                        return false;
+                    } finally {
                         isLoadingOlderGroup = false;
-                        return;
                     }
-                    const previousHeight = groupContainer.scrollHeight;
-                    appendGroupMessages(messages, true);
-                    updateGroupCounters(messages);
-                    if (messages.length < 50) noMoreOlderGroup = true;
-                    const newHeight = groupContainer.scrollHeight;
-                    groupContainer.scrollTop += newHeight - previousHeight;
-                    isLoadingOlderGroup = false;
                 }
 
                 window.jumpToMessage = async function(messageId) {
                     let message = groupContainer.querySelector(`.message[data-id="${messageId}"]`);
                     let pages = 0;
                     while (!message && !noMoreOlderGroup && pages < 30) {
-                        await loadOlderGroup();
+                        if (!await loadOlderGroup()) break;
                         pages++;
                         message = groupContainer.querySelector(`.message[data-id="${messageId}"]`);
                     }
@@ -1334,8 +1367,12 @@ usort($all_conversations, function($a, $b) {
                 async function react(messageId, emoji) {
                     const currentReaction = document.querySelector(`.message[data-id="${messageId}"] .user-reaction`)?.innerText;
                     const action = (currentReaction === emoji) ? 'remove' : 'add';
-                    await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${emoji}&action=${action}&type=group` });
-                    loadInitialGroup();
+                    try {
+                        const response = await fetch('react_message.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`message_id=${messageId}&emoji=${encodeURIComponent(emoji)}&action=${action}&type=group` });
+                        const result = await response.json();
+                        if (!result.success) { alert(result.error || 'ثبت واکنش ناموفق بود.'); return; }
+                        await loadInitialGroup();
+                    } catch (error) { alert('ثبت واکنش انجام نشد؛ اتصال را بررسی کنید.'); }
                 }
                 async function togglePin(messageId, isPinned) {
                     const action = isPinned ? 'unpin' : 'pin';
@@ -1618,10 +1655,20 @@ usort($all_conversations, function($a, $b) {
         localStorage.setItem('navHidden', isHidden);
     }
 
-    async function blockUser(targetId) {
-        const action = confirm('برای مسدود کردن کاربر کلیک کنید. لغو = رفع مسدودیت') ? 'block' : 'unblock';
-        await fetch('block_user.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`target_id=${targetId}&action=${action}` });
-        location.reload();
+    async function blockUser(targetId, isBlocked) {
+        const action = isBlocked ? 'unblock' : 'block';
+        const promptText = isBlocked ? 'مسدودیت این کاربر برداشته شود؟' : 'این کاربر مسدود شود؟';
+        if (!confirm(promptText)) return;
+        try {
+            const response = await fetch('block_user.php', {
+                method: 'POST',
+                headers: {'Content-Type':'application/x-www-form-urlencoded'},
+                body: `target_id=${targetId}&action=${action}`
+            });
+            const result = await response.json();
+            if (!result.success) { alert(result.error || 'عملیات ناموفق بود.'); return; }
+            location.reload();
+        } catch (error) { alert('ارتباط با سرور برقرار نشد.'); }
     }
     function reportMessage(targetId, targetType) {
         const reason = prompt('دلیل گزارش:');

@@ -28,6 +28,16 @@ if ($type === 'private') {
         exit;
     }
     $table = 'private_message_reactions';
+    try {
+        $pdo->query('SELECT 1 FROM private_message_reactions LIMIT 0');
+    } catch (PDOException $error) {
+        if ($error->getCode() === '42S02') {
+            http_response_code(503);
+            echo json_encode(['success' => false, 'error' => 'برای واکنش خصوصی، migration مربوطه باید روی دیتابیس اجرا شود.']);
+            exit;
+        }
+        throw $error;
+    }
 } elseif ($type === 'group') {
     $message = $pdo->prepare("SELECT m.group_id FROM group_channel_messages m
                               JOIN group_channel_members gcm ON gcm.group_id = m.group_id AND gcm.user_id = ?
@@ -47,10 +57,21 @@ if ($type === 'private') {
 }
 
 if ($action === 'add') {
-    $pdo->prepare("INSERT IGNORE INTO {$table} (message_id, user_id, emoji) VALUES (?, ?, ?)")
-        ->execute([$message_id, $user_id, $emoji]);
+    // The UI represents one reaction per member/message; replace an earlier choice.
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM {$table} WHERE message_id = ? AND user_id = ?")
+            ->execute([$message_id, $user_id]);
+        $pdo->prepare("INSERT INTO {$table} (message_id, user_id, emoji) VALUES (?, ?, ?)")
+            ->execute([$message_id, $user_id, $emoji]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 } else {
-    $pdo->prepare("DELETE FROM {$table} WHERE message_id = ? AND user_id = ? AND emoji = ?")
-        ->execute([$message_id, $user_id, $emoji]);
+    // Clear stale duplicate reactions too, e.g. rows created before the one-reaction rule.
+    $pdo->prepare("DELETE FROM {$table} WHERE message_id = ? AND user_id = ?")
+        ->execute([$message_id, $user_id]);
 }
 echo json_encode(['success' => true]);

@@ -15,6 +15,12 @@ if (!$message_id || ($new_text === '' && $file_url === '')) {
     echo json_encode(['success' => false, 'error' => 'متن یا لینک رسانه باید وارد شود.']);
     exit;
 }
+$textLength = function_exists('mb_strlen') ? mb_strlen($new_text, 'UTF-8') : strlen($new_text);
+$descriptionLength = function_exists('mb_strlen') ? mb_strlen($file_description, 'UTF-8') : strlen($file_description);
+if ($textLength > 10000 || $descriptionLength > 255) {
+    echo json_encode(['success' => false, 'error' => 'طول پیام یا توضیح پیوند بیش از حد مجاز است.']);
+    exit;
+}
 if (!isAllowedMediaLink($pdo, $file_url)) {
     echo json_encode(['success' => false, 'error' => 'لینک رسانه باید HTTPS و از دامنه مجاز باشد.']);
     exit;

@@ -38,7 +38,7 @@ if ($after) {
             u.avatar_url,
             COUNT(DISTINCT r.user_id) as reaction_count,
             GROUP_CONCAT(DISTINCT r.emoji SEPARATOR ' ') as all_emojis,
-            (SELECT emoji FROM message_reactions WHERE message_id = m.id AND user_id = ? LIMIT 1) as user_emoji,
+            (SELECT emoji FROM message_reactions WHERE message_id = m.id AND user_id = ? ORDER BY reacted_at DESC LIMIT 1) as user_emoji,
             CASE WHEN p.message_id IS NOT NULL THEN 1 ELSE 0 END as is_pinned,
             COUNT(DISTINCT rs.user_id) as read_count
         FROM group_channel_messages m
@@ -70,7 +70,7 @@ if ($after) {
             u.avatar_url,
             COUNT(DISTINCT r.user_id) as reaction_count,
             GROUP_CONCAT(DISTINCT r.emoji SEPARATOR ' ') as all_emojis,
-            (SELECT emoji FROM message_reactions WHERE message_id = m.id AND user_id = ? LIMIT 1) as user_emoji,
+            (SELECT emoji FROM message_reactions WHERE message_id = m.id AND user_id = ? ORDER BY reacted_at DESC LIMIT 1) as user_emoji,
             CASE WHEN p.message_id IS NOT NULL THEN 1 ELSE 0 END as is_pinned,
             COUNT(DISTINCT rs.user_id) as read_count
         FROM group_channel_messages m
@@ -105,7 +105,7 @@ if ($after) {
             u.avatar_url,
             COUNT(DISTINCT r.user_id) as reaction_count,
             GROUP_CONCAT(DISTINCT r.emoji SEPARATOR ' ') as all_emojis,
-            (SELECT emoji FROM message_reactions WHERE message_id = m.id AND user_id = ? LIMIT 1) as user_emoji,
+            (SELECT emoji FROM message_reactions WHERE message_id = m.id AND user_id = ? ORDER BY reacted_at DESC LIMIT 1) as user_emoji,
             CASE WHEN p.message_id IS NOT NULL THEN 1 ELSE 0 END as is_pinned,
             COUNT(DISTINCT rs.user_id) as read_count
         FROM group_channel_messages m

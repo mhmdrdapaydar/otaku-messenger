@@ -44,7 +44,7 @@ $file_url = trim($_POST['file_url'] ?? '');
 $file_description = trim($_POST['file_description'] ?? '');
 $messageLength = function_exists('mb_strlen') ? mb_strlen($message, 'UTF-8') : strlen($message);
 $descriptionLength = function_exists('mb_strlen') ? mb_strlen($file_description, 'UTF-8') : strlen($file_description);
-if ($messageLength > 10000 || $descriptionLength > 500) {
+if ($messageLength > 10000 || $descriptionLength > 255) {
     echo json_encode(['success' => false, 'error' => 'طول پیام یا توضیح فایل بیش از حد مجاز است.']);
     exit;
 }
@@ -138,8 +138,17 @@ if ($type === 'private') {
         exit;
     }
 
-    // نقش مالک یا مدیر (بدون محدودیت)
-    if (in_array($m['role'], ['owner', 'admin'])) {
+    // Owner always has access. Admins must have the explicit send-message grant.
+    if ($m['role'] === 'admin') {
+        $adminPermission = $pdo->prepare("SELECT can_send_message FROM admin_permissions WHERE member_id = ?");
+        $adminPermission->execute([$m['id']]);
+        $adminGrant = $adminPermission->fetch();
+        if (!$adminGrant || !(bool)$adminGrant['can_send_message']) {
+            echo json_encode(['success' => false, 'error' => 'مجوز ارسال پیام ندارید.']);
+            exit;
+        }
+    }
+    if (in_array($m['role'], ['owner', 'admin'], true)) {
         $stmt = $pdo->prepare("INSERT INTO group_channel_messages (group_id, sender_id, message, file_url, file_description) VALUES (?, ?, ?, ?, ?)");
         $stmt->execute([$group_id, $user_id, $message, $file_url ?: null, $file_description ?: null]);
         $msg_id = $pdo->lastInsertId();
