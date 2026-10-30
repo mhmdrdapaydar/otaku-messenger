@@ -252,7 +252,8 @@ usort($all_conversations, function($a, $b) {
 <head>
     <meta charset="UTF-8">
     <title>پیام‌رسان | دنیای اوتاکو</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#090b16">
     <style>
         /* همان استایل‌های قبلی بدون تغییر */
         :root {
@@ -546,12 +547,14 @@ usort($all_conversations, function($a, $b) {
         .bottom-nav .nav-item.active span { color: #fff; font-weight: bold; }
         .bottom-nav .nav-item:not(.active):hover .icon { color: #ff8fa3; transform: translateY(-3px); }
     </style>
+    <link rel="stylesheet" href="messenger.css?v=2">
 </head>
-<body>
+<body class="<?= in_array($page, ['chat', 'group'], true) ? 'in-conversation' : '' ?>">
 <div class="particles">
     <div class="particle"></div><div class="particle"></div><div class="particle"></div>
     <div class="particle"></div><div class="particle"></div><div class="particle"></div>
 </div>
+<div class="sidebar-backdrop" onclick="closeSidebar()" aria-hidden="true"></div>
 
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
@@ -737,35 +740,32 @@ usort($all_conversations, function($a, $b) {
                 <input type="hidden" name="receiver_id" value="<?= $user_chat_id ?>">
                 <div class="message-row">
                     <input type="text" name="message" id="privateInput" placeholder="پیام..." autocomplete="off">
-                    <button type="button" class="attach-btn" onclick="toggleAttachPanel('privateAttach')" title="افزودن فایل">📎</button>
+                    <button type="button" class="attach-btn" onclick="toggleAttachPanel('privateAttach')" title="افزودن لینک رسانه">🔗</button>
                     <button type="submit" class="send-btn" id="privateSendBtn">➤</button>
                 </div>
                 <div class="file-attach-panel" id="privateAttach">
-                    <input type="url" name="file_url" placeholder="لینک فایل (اختیاری)">
-                    <input type="text" name="file_description" placeholder="توضیحات فایل">
+                    <input type="url" name="file_url" placeholder="پیوند HTTPS رسانه (دامنه مجاز)">
+                    <input type="text" name="file_description" placeholder="توضیح پیوند، اختیاری">
+                    <small class="link-only-note">فایل روی سرور پیام‌رسان بارگذاری نمی‌شود؛ فقط لینک ذخیره می‌شود.</small>
                 </div>
             </form>
         <?php endif; ?>
 
         <script>
             const chatUserId = <?= $user_chat_id ?>;
-            function isImageUrl(url) { return /\.(jpg|jpeg|png|gif)(\?.*)?$/i.test(url); }
+            function isImageUrl(url) { return /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url); }
             function renderFileAttachment(fileUrl, fileDesc) {
-                if (isImageUrl(fileUrl)) {
-                    return `<div class="file-attachment" data-file="${fileUrl}">
-                        <button class="view-image-btn" onclick="viewImageAttachment(this, '${fileUrl}')" style="background:var(--primary); border:none; color:#fff; padding:6px 12px; border-radius:20px; cursor:pointer;">📥 مشاهده تصویر</button>
-                        ${fileDesc ? '<br><small>'+fileDesc+'</small>' : ''}
-                    </div>`;
-                } else {
-                    return `<div class="file-attachment"><a href="${fileUrl}" target="_blank">📎 فایل</a>${fileDesc ? '<br><small>'+fileDesc+'</small>' : ''}</div>`;
+                let safeUrl;
+                try {
+                    const parsed = new URL(fileUrl, window.location.href);
+                    if (parsed.protocol !== 'https:') return '<div class="file-attachment">پیوند رسانه نامعتبر است.</div>';
+                    safeUrl = escapeHtml(parsed.href);
+                } catch (error) {
+                    return '<div class="file-attachment">پیوند رسانه نامعتبر است.</div>';
                 }
-            }
-            function viewImageAttachment(btn, url) {
-                const container = btn.parentElement;
-                container.innerHTML = `
-                    <img src="${url}" alt="تصویر" style="max-width:250px; max-height:200px; border-radius:10px; display:block; margin-bottom:5px;">
-                    <a href="${url}" download target="_blank" style="color:var(--primary); font-size:0.9rem;">💾 ذخیره تصویر</a>
-                `;
+                const description = fileDesc ? `<br><small>${escapeHtml(fileDesc)}</small>` : '';
+                const label = isImageUrl(safeUrl) ? '🖼️ مشاهده تصویر' : '🔗 بازکردن پیوند رسانه';
+                return `<div class="file-attachment"><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>${description}</div>`;
             }
             function toggleActions(div) { div.classList.toggle('show-actions'); }
             function escapeHtml(text) {
@@ -966,17 +966,23 @@ usort($all_conversations, function($a, $b) {
             if (privateForm) privateForm.addEventListener('submit', async e => {
                 e.preventDefault();
                 const sendBtn = document.getElementById('privateSendBtn');
+                if (!privateForm.querySelector('[name="message"]').value.trim() && !privateForm.querySelector('[name="file_url"]').value.trim()) return;
                 sendBtn.disabled = true;
-                const formData = new FormData(e.target);
-                const res = await fetch('send_message.php', { method:'POST', body: formData });
-                const result = await res.json();
-                sendBtn.disabled = false;
-                if (result.success) {
-                    document.getElementById('privateInput').value = '';
-                    document.querySelector('[name="file_url"]').value = '';
-                    document.querySelector('[name="file_description"]').value = '';
-                    loadInitialPrivate();
-                } else alert(result.error || 'خطا');
+                try {
+                    const res = await fetch('send_message.php', { method:'POST', body: new FormData(privateForm) });
+                    const result = await res.json();
+                    if (result.success) {
+                        document.getElementById('privateInput').value = '';
+                        privateForm.querySelector('[name="file_url"]').value = '';
+                        privateForm.querySelector('[name="file_description"]').value = '';
+                        document.getElementById('privateAttach').classList.remove('active');
+                        await loadInitialPrivate();
+                    } else alert(result.error || 'ارسال پیام ناموفق بود.');
+                } catch (error) {
+                    alert('ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
+                } finally {
+                    sendBtn.disabled = false;
+                }
             });
         </script>
     <?php endif; ?>
@@ -1040,12 +1046,13 @@ usort($all_conversations, function($a, $b) {
                     <input type="hidden" name="group_id" value="<?= $target_id ?>">
                     <div class="message-row">
                         <input type="text" name="message" id="groupInput" placeholder="پیام..." autocomplete="off">
-                        <button type="button" class="attach-btn" onclick="toggleAttachPanel('groupAttach')" title="افزودن فایل">📎</button>
+                        <button type="button" class="attach-btn" onclick="toggleAttachPanel('groupAttach')" title="افزودن لینک رسانه">🔗</button>
                         <button type="submit" class="send-btn" id="groupSendBtn">➤</button>
                     </div>
                     <div class="file-attach-panel" id="groupAttach">
-                        <input type="url" name="file_url" placeholder="لینک فایل (اختیاری)">
-                        <input type="text" name="file_description" placeholder="توضیحات فایل">
+                        <input type="url" name="file_url" placeholder="پیوند HTTPS رسانه (دامنه مجاز)">
+                        <input type="text" name="file_description" placeholder="توضیح پیوند، اختیاری">
+                        <small class="link-only-note">فایل روی سرور پیام‌رسان بارگذاری نمی‌شود؛ فقط لینک ذخیره می‌شود.</small>
                     </div>
                 </form>
             <?php endif; ?>
@@ -1054,23 +1061,19 @@ usort($all_conversations, function($a, $b) {
                 const groupId = <?= $target_id ?>;
                 const isAdmin = <?= $is_admin_base ? 'true' : 'false' ?>;
                 const groupType = '<?= $group['type'] ?>';
-                function isImageUrl(url) { return /\.(jpg|jpeg|png|gif)(\?.*)?$/i.test(url); }
+                function isImageUrl(url) { return /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url); }
                 function renderFileAttachment(fileUrl, fileDesc) {
-                    if (isImageUrl(fileUrl)) {
-                        return `<div class="file-attachment" data-file="${fileUrl}">
-                            <button class="view-image-btn" onclick="viewImageAttachment(this, '${fileUrl}')" style="background:var(--primary); border:none; color:#fff; padding:6px 12px; border-radius:20px; cursor:pointer;">📥 مشاهده تصویر</button>
-                            ${fileDesc ? '<br><small>'+fileDesc+'</small>' : ''}
-                        </div>`;
-                    } else {
-                        return `<div class="file-attachment"><a href="${fileUrl}" target="_blank">📎 فایل</a>${fileDesc ? '<br><small>'+fileDesc+'</small>' : ''}</div>`;
+                    let safeUrl;
+                    try {
+                        const parsed = new URL(fileUrl, window.location.href);
+                        if (parsed.protocol !== 'https:') return '<div class="file-attachment">پیوند رسانه نامعتبر است.</div>';
+                        safeUrl = escapeHtml(parsed.href);
+                    } catch (error) {
+                        return '<div class="file-attachment">پیوند رسانه نامعتبر است.</div>';
                     }
-                }
-                function viewImageAttachment(btn, url) {
-                    const container = btn.parentElement;
-                    container.innerHTML = `
-                        <img src="${url}" alt="تصویر" style="max-width:250px; max-height:200px; border-radius:10px; display:block; margin-bottom:5px;">
-                        <a href="${url}" download target="_blank" style="color:var(--primary); font-size:0.9rem;">💾 ذخیره تصویر</a>
-                    `;
+                    const description = fileDesc ? `<br><small>${escapeHtml(fileDesc)}</small>` : '';
+                    const label = isImageUrl(safeUrl) ? '🖼️ مشاهده تصویر' : '🔗 بازکردن پیوند رسانه';
+                    return `<div class="file-attachment"><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${label}</a>${description}</div>`;
                 }
                 function toggleActions(div) { div.classList.toggle('show-actions'); }
                 function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
@@ -1287,17 +1290,23 @@ usort($all_conversations, function($a, $b) {
                 if (groupForm) groupForm.addEventListener('submit', async e => {
                     e.preventDefault();
                     const sendBtn = document.getElementById('groupSendBtn');
+                    if (!groupForm.querySelector('[name="message"]').value.trim() && !groupForm.querySelector('[name="file_url"]').value.trim()) return;
                     sendBtn.disabled = true;
-                    const formData = new FormData(e.target);
-                    const res = await fetch('send_message.php', { method:'POST', body: formData });
-                    const result = await res.json();
-                    sendBtn.disabled = false;
-                    if (result.success) {
-                        document.getElementById('groupInput').value = '';
-                        document.querySelector('[name="file_url"]').value = '';
-                        document.querySelector('[name="file_description"]').value = '';
-                        loadInitialGroup();
-                    } else alert(result.error || 'خطا');
+                    try {
+                        const res = await fetch('send_message.php', { method:'POST', body: new FormData(groupForm) });
+                        const result = await res.json();
+                        if (result.success) {
+                            document.getElementById('groupInput').value = '';
+                            groupForm.querySelector('[name="file_url"]').value = '';
+                            groupForm.querySelector('[name="file_description"]').value = '';
+                            document.getElementById('groupAttach').classList.remove('active');
+                            await loadInitialGroup();
+                        } else alert(result.error || 'ارسال پیام ناموفق بود.');
+                    } catch (error) {
+                        alert('ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید.');
+                    } finally {
+                        sendBtn.disabled = false;
+                    }
                 });
             </script>
         <?php else: ?>
@@ -1355,8 +1364,18 @@ usort($all_conversations, function($a, $b) {
 
 <script>
     const currentUserId = <?= $current_user_id ?>;
-    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
-    function closeSidebar() { if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open'); }
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const isOpen = sidebar.classList.toggle('open');
+        document.body.classList.toggle('sidebar-open', isOpen);
+    }
+    function closeSidebar() {
+        if (window.innerWidth <= 768) {
+            document.getElementById('sidebar').classList.remove('open');
+            document.body.classList.remove('sidebar-open');
+        }
+    }
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSidebar(); });
     setInterval(() => { fetch('heartbeat.php'); }, 30000);
 
     async function updateUnreadCounts() {
