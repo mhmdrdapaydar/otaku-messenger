@@ -76,49 +76,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // ---- بارگذاری پست‌های خودکار از JSON ----
-    elseif ($action === 'import_json') {
-        if (!isset($_FILES['json_file']) || $_FILES['json_file']['error'] !== UPLOAD_ERR_OK) {
-            $error = "خطا در بارگذاری فایل JSON.";
-        } else {
-            $json_content = file_get_contents($_FILES['json_file']['tmp_name']);
-            $posts_data = json_decode($json_content, true);
-            if (!is_array($posts_data)) {
-                $error = "فرمت JSON نامعتبر است. آرایه‌ای از پست‌ها مورد انتظار است.";
-            } else {
-                $imported = 0;
-                $skipped = 0;
-                $stmt = $pdo->prepare("INSERT INTO posts (user_id, title, subtitle, media_url, is_auto_generated, share_hash) VALUES (?, ?, ?, ?, 1, ?)");
-
-                foreach ($posts_data as $post) {
-                    $title = trim($post['title'] ?? '');
-                    if (empty($title)) {
-                        $skipped++;
-                        continue;
-                    }
-                    $subtitle = trim($post['subtitle'] ?? '');
-                    $media_url = '';
-                    if (isset($post['img'])) {
-                        $parts = ['img=' . trim($post['img'])];
-                        if (isset($post['qualities']) && is_array($post['qualities'])) {
-                            foreach ($post['qualities'] as $quality => $link) {
-                                $parts[] = trim($quality) . '=' . trim($link);
-                            }
-                        }
-                        $media_url = implode(',', $parts);
-                    }
-                    if (strlen($media_url) > 500) {
-                        $skipped++;
-                        continue;
-                    }
-                    $share_hash = bin2hex(random_bytes(10));
-                    $stmt->execute([$admin_id, $title, $subtitle, $media_url, $share_hash]);
-                    $imported++;
-                }
-                $message = "{$imported} پست با موفقیت وارد شد. {$skipped} پست به دلیل نقص داده رد شد.";
-            }
-        }
-    }
 }
 
 // ---------------------- جستجوی کاربران ----------------------
@@ -264,14 +221,7 @@ $total_user_posts = $pdo->query("SELECT COUNT(*) FROM posts WHERE is_auto_genera
     <!-- ──────── بارگذاری JSON ──────── -->
     <div class="card">
         <h2>📥 بارگذاری پست‌های خودکار از JSON</h2>
-        <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="action" value="import_json">
-            <div class="form-group">
-                <label>فایل JSON (آرایه‌ای از پست‌ها با ساختار: title, subtitle, img, qualities)</label>
-                <input type="file" name="json_file" accept=".json" required>
-            </div>
-            <button class="btn">📥 بارگذاری</button>
-        </form>
+        <p>بارگذاری فایل غیرفعال است؛ برای اشتراک رسانه از لینک دامنه مجاز استفاده کنید.</p>
     </div>
 
     <!-- ──────── حذف گروهی ──────── -->

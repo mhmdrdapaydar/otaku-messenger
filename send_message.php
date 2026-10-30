@@ -1,6 +1,6 @@
 <?php
 require_once 'config.php';
-session_start();
+header('Content-Type: application/json; charset=utf-8');
 if (!isset($_SESSION['user_id'])) {
     http_response_code(403); exit;
 }
@@ -41,15 +41,25 @@ $type = $_POST['type'] ?? '';
 $message = trim($_POST['message'] ?? '');
 $file_url = trim($_POST['file_url'] ?? '');
 $file_description = trim($_POST['file_description'] ?? '');
+$messageLength = function_exists('mb_strlen') ? mb_strlen($message, 'UTF-8') : strlen($message);
+$descriptionLength = function_exists('mb_strlen') ? mb_strlen($file_description, 'UTF-8') : strlen($file_description);
+if ($messageLength > 10000 || $descriptionLength > 500) {
+    echo json_encode(['success' => false, 'error' => 'طول پیام یا توضیح فایل بیش از حد مجاز است.']);
+    exit;
+}
 
 // اگر فایل ارسال شده، دامنه رو بررسی کن
 if ($file_url !== '') {
-    $parsed = parse_url($file_url);
-    if (!isset($parsed['host'])) {
-        echo json_encode(['success'=>false, 'error'=>'لینک فایل نامعتبر است.']);
+    $parsed = filter_var($file_url, FILTER_VALIDATE_URL) ? parse_url($file_url) : false;
+    if (!$parsed || strtolower($parsed['scheme'] ?? '') !== 'https'
+        || empty($parsed['host']) || isset($parsed['user']) || isset($parsed['pass'])) {
+        echo json_encode(['success'=>false, 'error'=>'لینک فایل باید یک نشانی HTTPS معتبر باشد.']);
         exit;
     }
-    $domain = str_replace('www.', '', $parsed['host']);
+    $domain = strtolower(rtrim($parsed['host'], '.'));
+    if (str_starts_with($domain, 'www.')) {
+        $domain = substr($domain, 4);
+    }
     $stmtDomain = $pdo->prepare("SELECT 1 FROM allowed_domains WHERE domain = ?");
     $stmtDomain->execute([$domain]);
     if (!$stmtDomain->fetchColumn()) {
