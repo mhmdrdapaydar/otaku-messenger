@@ -809,6 +809,17 @@ usort($all_conversations, function($a, $b) {
                 input.focus();
             }
             function formatMessage(rawText) {
+                const forwarded = rawText.match(/^\[forward:v1:([A-Za-z0-9+/=]+)\]\s*/);
+                if (forwarded) {
+                    try {
+                        const bytes = Uint8Array.from(atob(forwarded[1]), character => character.charCodeAt(0));
+                        const attribution = JSON.parse(new TextDecoder().decode(bytes));
+                        const rest = rawText.substring(forwarded[0].length);
+                        const conversation = attribution.conversation ? `<span class="forwarded-conversation">· ${escapeHtml(attribution.conversation)}</span>` : '';
+                        const content = rest ? formatMessage(rest) : '';
+                        return `<div class="forwarded-block">↪️ فورواردشده از <strong>${escapeHtml(attribution.name || 'کاربر')}</strong>${conversation}</div>${content}`;
+                    } catch (error) {}
+                }
                 const modernReply = rawText.match(/^\[reply2:([^\]]+)\]\s*/);
                 if (modernReply) {
                     try {
@@ -876,6 +887,7 @@ usort($all_conversations, function($a, $b) {
                 actionsHtml += '</div>';
                 actionsHtml += `<button class="copy-btn" onclick="copyMessage(${msg.id})" title="کپی پیام">📋</button>`;
                 actionsHtml += `<button class="reply-btn" data-reply-id="${msg.id}" data-reply-name="${encodeURIComponent(msg.sender_name || '')}" data-reply-text="${encodeURIComponent(msg.message || '')}" title="پاسخ" aria-label="پاسخ به پیام">↩️</button>`;
+                actionsHtml += `<button class="forward-btn" onclick="openForwardModal(${msg.id}, 'private')" title="فوروارد پیام" aria-label="فوروارد پیام">↗️</button>`;
                 if (isMine) {
                     actionsHtml += `<button class="edit-btn" onclick="editMessage(${msg.id}, 'private')">✏️</button>`;
                     actionsHtml += `<button class="delete-btn" onclick="deleteMsg(${msg.id}, 'private')">🗑️</button>`;
@@ -1164,6 +1176,17 @@ usort($all_conversations, function($a, $b) {
                     input.focus();
                 }
                 function formatMessage(rawText) {
+                        const forwarded = rawText.match(/^\[forward:v1:([A-Za-z0-9+/=]+)\]\s*/);
+                        if (forwarded) {
+                            try {
+                                const bytes = Uint8Array.from(atob(forwarded[1]), character => character.charCodeAt(0));
+                                const attribution = JSON.parse(new TextDecoder().decode(bytes));
+                                const rest = rawText.substring(forwarded[0].length);
+                                const conversation = attribution.conversation ? `<span class="forwarded-conversation">· ${escapeHtml(attribution.conversation)}</span>` : '';
+                                const content = rest ? formatMessage(rest) : '';
+                                return `<div class="forwarded-block">↪️ فورواردشده از <strong>${escapeHtml(attribution.name || 'کاربر')}</strong>${conversation}</div>${content}`;
+                            } catch (error) {}
+                        }
                         const modernReply = rawText.match(/^\[reply2:([^\]]+)\]\s*/);
                     if (modernReply) {
                         try {
@@ -1239,6 +1262,7 @@ usort($all_conversations, function($a, $b) {
                     actionsHtml += '</div>';
                     actionsHtml += `<button class="copy-btn" onclick="copyMessage(${msg.id})" title="کپی پیام">📋</button>`;
                     actionsHtml += `<button class="reply-btn" data-reply-id="${msg.id}" data-reply-name="${encodeURIComponent(msg.sender_name || '')}" data-reply-text="${encodeURIComponent(msg.message || '')}" title="پاسخ" aria-label="پاسخ به پیام">↩️</button>`;
+                    actionsHtml += `<button class="forward-btn" onclick="openForwardModal(${msg.id}, 'group')" title="فوروارد پیام" aria-label="فوروارد پیام">↗️</button>`;
                     if (canEdit) actionsHtml += `<button class="edit-btn" onclick="editMessage(${msg.id}, 'group')">✏️</button>`;
                     if (isMine || <?= $can_delete_group_messages ? 'true' : 'false' ?>) actionsHtml += `<button class="delete-btn" onclick="deleteMsg(${msg.id}, 'group')">🗑️</button>`;
                     if (<?= $can_pin_group_messages ? 'true' : 'false' ?>) actionsHtml += `<button class="pin-btn" onclick="togglePin(${msg.id}, ${msg.is_pinned})">📌</button>`;
@@ -1451,6 +1475,19 @@ usort($all_conversations, function($a, $b) {
     </div>
 </div>
 
+<!-- انتخاب مقصد برای فوروارد -->
+<div id="forwardModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this) closeForwardModal()">
+    <div class="modal forward-modal" role="dialog" aria-modal="true" aria-labelledby="forwardTitle">
+        <div class="search-modal-heading">
+            <div><h3 id="forwardTitle">فوروارد پیام</h3><p>گفتگوی مقصد را انتخاب کنید. فایل‌ها بارگذاری نمی‌شوند؛ فقط لینک رسانه منتقل می‌شود.</p></div>
+            <button type="button" class="btn-icon" onclick="closeForwardModal()" aria-label="بستن">×</button>
+        </div>
+        <input type="search" id="forwardSearchInput" placeholder="جستجوی کاربر برای فوروارد…" autocomplete="off" aria-label="جستجوی مقصد">
+        <div id="forwardStatus" class="search-status" role="status" aria-live="polite">گفتگوهای اخیر</div>
+        <div id="forwardTargets" class="message-search-results"></div>
+    </div>
+</div>
+
 <!-- مودال ویرایش -->
 <div id="editModal" class="modal-overlay" style="display:none;">
     <div class="modal">
@@ -1478,6 +1515,87 @@ usort($all_conversations, function($a, $b) {
 
 <script>
     const currentUserId = <?= $current_user_id ?>;
+    const forwardDestinations = <?= json_encode(array_map(static function ($conversation) {
+        return ['type' => $conversation['type'], 'id' => (int)$conversation['id'], 'name' => $conversation['name'], 'kind' => $conversation['kind'] ?? ''];
+    }, $all_conversations), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) ?>;
+    let forwardSource = null;
+    let forwardSearchTimer;
+    let forwardSearchController;
+    function closeForwardModal() {
+        document.getElementById('forwardModal').style.display = 'none';
+        if (forwardSearchController) forwardSearchController.abort();
+    }
+    function addForwardTarget(container, target, type, id, name) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'message-search-result';
+        const title = document.createElement('span');
+        title.className = 'message-search-result-text';
+        title.textContent = `${type === 'group' ? (target.kind === 'channel' ? '📢 ' : '👥 ') : '💬 '}${name}`;
+        const note = document.createElement('small');
+        note.textContent = type === 'group' ? 'گروه یا کانال' : 'گفتگوی خصوصی';
+        button.append(title, note);
+        button.addEventListener('click', () => forwardTo(type, id, button));
+        container.appendChild(button);
+    }
+    function openForwardModal(messageId, sourceType) {
+        forwardSource = {id: Number(messageId), type: sourceType};
+        const modal = document.getElementById('forwardModal');
+        const targets = document.getElementById('forwardTargets');
+        targets.replaceChildren();
+        document.getElementById('forwardSearchInput').value = '';
+        document.getElementById('forwardStatus').textContent = 'گفتگوهای اخیر';
+        const seen = new Set();
+        forwardDestinations.forEach(target => {
+            const key = `${target.type}:${target.id}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            addForwardTarget(targets, target, target.type, target.id, target.name);
+        });
+        if (!targets.children.length) document.getElementById('forwardStatus').textContent = 'گفتگوی فعالی ندارید؛ نام کاربر را جستجو کنید.';
+        modal.style.display = 'flex';
+        document.getElementById('forwardSearchInput').focus();
+    }
+    async function forwardTo(type, id, button) {
+        if (!forwardSource) return;
+        button.disabled = true;
+        try {
+            const body = new URLSearchParams({source_type: forwardSource.type, source_id: forwardSource.id, destination_type: type, destination_id: id});
+            const response = await fetch('forward_message.php', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body});
+            const result = await response.json();
+            if (!response.ok || !result.success) { alert(result.error || 'فوروارد پیام ناموفق بود.'); button.disabled = false; return; }
+            closeForwardModal();
+            alert('پیام فوروارد شد.');
+        } catch (error) {
+            button.disabled = false;
+            alert('ارتباط با سرور برقرار نشد.');
+        }
+    }
+    document.getElementById('forwardSearchInput').addEventListener('input', () => {
+        clearTimeout(forwardSearchTimer);
+        forwardSearchTimer = setTimeout(async () => {
+            const query = document.getElementById('forwardSearchInput').value.trim();
+            const status = document.getElementById('forwardStatus');
+            const targets = document.getElementById('forwardTargets');
+            if (query.length < 2) { targets.replaceChildren(); status.textContent = 'برای جستجو دست‌کم دو نویسه وارد کنید.'; return; }
+            if (forwardSearchController) forwardSearchController.abort();
+            forwardSearchController = new AbortController();
+            status.textContent = 'در حال جستجو…';
+            targets.replaceChildren();
+            try {
+                const response = await fetch(`search_all.php?q=${encodeURIComponent(query)}`, {signal:forwardSearchController.signal});
+                const items = await response.json();
+                const unique = new Set();
+                items.filter(item => item.type === 'user' || item.type === 'private_chat').forEach(item => {
+                    const key = `private:${item.id}`;
+                    if (unique.has(key)) return;
+                    unique.add(key);
+                    addForwardTarget(targets, {kind:''}, 'private', item.id, item.name);
+                });
+                status.textContent = targets.children.length ? 'برای انتخاب، مقصد را بزنید.' : 'کاربری پیدا نشد.';
+            } catch (error) { if (error.name !== 'AbortError') status.textContent = 'جستجوی مقصد ناموفق بود.'; }
+        }, 250);
+    });
     const messageSearchContext = {
         type: <?= json_encode($page === 'chat' ? 'private' : 'group') ?>,
         id: <?= (int)($page === 'chat' ? $user_chat_id : $target_id) ?>
@@ -1556,7 +1674,7 @@ usort($all_conversations, function($a, $b) {
         }
     }
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { closeSidebar(); closeMessageSearch(); }
+        if (event.key === 'Escape') { closeSidebar(); closeMessageSearch(); closeForwardModal(); }
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && document.body.classList.contains('in-conversation')) {
             event.preventDefault();
             openMessageSearch();

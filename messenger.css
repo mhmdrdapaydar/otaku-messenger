@@ -97,6 +97,11 @@ a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid 
 .message-search-result:hover { background: rgba(255,85,120,.12); border-color: rgba(255,85,120,.32); }
 .message-search-result-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message-search-result small { color: var(--secondary-text); }
+.forward-modal { width: min(92vw, 560px); max-height: min(80vh, 680px); }
+.forwarded-block { padding: 3px 0 7px; margin-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,.12); color: #f7c8d4; font-size: .78rem; }
+.forwarded-block .forwarded-conversation { color: var(--secondary-text); margin-inline-start: 5px; }
+.forward-btn { background: transparent; border: none; cursor: pointer; font-size: 1rem; margin-left: 4px; color: var(--secondary-text); }
+.forward-btn:hover { background: rgba(255,255,255,.10); border-radius: 8px; }
 .message-highlight { animation: messageGlow 1.8s ease-out; }
 @keyframes messageGlow { 0%, 35% { outline: 3px solid rgba(255,209,102,.9); box-shadow: 0 0 24px rgba(255,209,102,.35); } 100% { outline-color: transparent; box-shadow: none; } }
 @media (max-width: 380px) {
