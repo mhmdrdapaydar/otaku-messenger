@@ -11,10 +11,12 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-$host = getenv('DB_HOST') ?: '127.0.0.1';
-$dbname = getenv('DB_NAME') ?: '';
-$username = getenv('DB_USER') ?: '';
-$password = getenv('DB_PASSWORD') ?: '';
+// Test-host defaults retained from the original project configuration.
+// Override these with environment variables when deploying to another server.
+$host = getenv('DB_HOST') ?: 'localhost';
+$dbname = getenv('DB_NAME') ?: 'bzhpbuxh_Otaku_db';
+$username = getenv('DB_USER') ?: 'bzhpbuxh_Oraku_admin_db';
+$password = getenv('DB_PASSWORD') ?: 'u1a9$#$JByi5O+#1';
 
 if ($dbname === '' || $username === '') {
     http_response_code(500);
