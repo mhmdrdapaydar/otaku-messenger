@@ -12,8 +12,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         // جستجوی کاربر با نام کاربری، ایمیل یا موبایل
         $stmt = $pdo->prepare("SELECT id, username, password, restricted_until FROM users 
-                               WHERE username = :user OR email = :user OR mobile = :user LIMIT 1");
-        $stmt->execute([':user' => $username]);
+                               WHERE username = :username OR email = :email OR mobile = :mobile LIMIT 1");
+        $stmt->execute([
+            ':username' => $username,
+            ':email' => $username,
+            ':mobile' => $username,
+        ]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($user && password_verify($password, $user['password'])) {
