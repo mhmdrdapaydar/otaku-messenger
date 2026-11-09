@@ -44,7 +44,7 @@ def main() -> int:
     print(f"عبارت بازیابی  : {phrase}")
     print(f"کلید خصوصی     : {private_key}")
     print("＝" * 56)
-    print("⚠️ آدرس را داخل bot/config.py → WALLET_ADDRESS جایگزین کنید.")
+    print("⚠️ آدرس را داخل otaku_hot_wallet_bot.py → WALLET_ADDRESS جایگزین کنید.")
     print("⚠️ کلید خصوصی/عبارت بازیابی را هرگز در گیت یا چت عمومی نگذارید.")
 
     if args.write_env:

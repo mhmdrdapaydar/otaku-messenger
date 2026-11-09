@@ -1,48 +1,53 @@
-# ربات تلگرام کیف پول هات (USDT BEP20)
+# ربات تلگرام کیف پول هات (USDT BEP20) — تک‌فایل
 
-ربات مدیریتی تلگرام با **pyTelegramBotAPI** و روش **Polling**؛ مخصوص ادمین (`5222486166`) تا موجودی کیف پول هات را ببیند و آن را شارژ کند.
+ربات مدیریتی تلگرام با **pyTelegramBotAPI** و **Polling**، مخصوص ادمین (`5222486166`)؛
+برای اجرا فقط به **یک فایل** نیاز دارید: [`otaku_hot_wallet_bot.py`](otaku_hot_wallet_bot.py)
 
 - شبکه: **BNB Smart Chain (BEP20)** — تتر (USDT)
 - قرارداد رسمی USDT روی BSC: `0x55d398326f99059fF775485246999027B3197955` (۱۸ اعشار)
-- آدرس کیف پول هات (عمومی، در `config.py`): `0x49a724C5d6d77Ac7a3939F3097DabE99F97B5e3C`
+- آدرس کیف پول هات (عمومی، داخل خودِ فایل): `0x49a724C5d6d77Ac7a3939F3097DabE99F97B5e3C`
 
-## دستورات
+> 🔐 آدرس عمومی داخل فایل است، ولی **توکن ربات و کلید خصوصی/عبارت بازیابی داخل فایل نیستند**.
+> آن‌ها از env یا فایل `.env` کنار اسکریپت خوانده می‌شوند.
+
+## دستورها
 
 | دستور | توضیح | دسترسی |
 |---|---|---|
 | `/start` | شروع + پنل دکمه‌های مدیریت | همه (پنل فقط برای ادمین) |
 | `/help` | راهنما | همه |
-| `/balance` | موجودی USDT (BEP20) و BNB کیف پول روی زنجیره | فقط ادمین |
+| `/balance` | موجودی USDT (BEP20) و BNB روی زنجیره | فقط ادمین |
 | `/charge` | آدرس شارژ + QR کد | فقط ادمین |
 
-## راه‌اندازی
+## راه‌اندازی (اپ جدا)
 
 ```bash
-cd bot
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install pyTelegramBotAPI requests segno
 
-cp .env.example .env   # سپس BOT_TOKEN و کلیدها را داخلش بگذارید
-python bot.py
+# یک فایل .env کنار otaku_hot_wallet_bot.py بسازید:
+cat > .env <<'EOF'
+BOT_TOKEN=توکن_BotFather
+WALLET_PRIVATE_KEY=0x...
+WALLET_MNEMONIC=twelve word phrase...
+EOF
+
+python otaku_hot_wallet_bot.py
 ```
 
-> توکن را از **@BotFather** بگیرید (`/newbot`). این مخزن از قبل یک `.env` محلی دارد؛
-> اگر روی دستگاه دیگری استقرار می‌دهید آن را دستی کپی کنید — **هرگز کامیت نکنید.**
-
-## تست سریع
+یا بدون `.env`:
 
 ```bash
-cd bot
-python -c "import config, wallet; print(config.WALLET_ADDRESS)"
+export BOT_TOKEN=توکن_BotFather
+python otaku_hot_wallet_bot.py
 ```
 
-## نکات امنیتی مهم ⚠️
+## نکات امنیتی ⚠️
 
-1. **عبارت بازیابی (mnemonic)** یعنی دسترسی کامل به دارایی‌های کیف پول. آن را در جای امن (آفلاین) یادداشت کنید.
-2. فایل `.env` در `.gitignore` است و **نباید** به گیت برود. اگر اشتباهی کامیت شد، بلافاصله کیف پول را عوض کنید.
-3. توکنی که در چت فرستاده شد را به کسی ندهید؛ اگر لو رفت از BotFather با `/revoke` باطلش کنید.
-4. ارسال دارایی فقط روی شبکهٔ **BEP20 (BSC)**؛ ارسال روی شبکهٔ اشتباه = از دست رفتن دارایی.
-5. برای انتقال/برداشت از کیف پول به مقداری **BNB** برای کارمزد نیاز دارید.
+1. **عبارت بازیابی (mnemonic)** = دسترسی کامل به دارایی‌ها؛ آن را آفلاین یادداشت کنید.
+2. `.env` در `.gitignore` است — **هرگز کامیت نکنید**. اگر لو رفت، کیف پول را عوض کنید.
+3. توکنی که در چت فرستاده شد را به کسی ندهید؛ در صورت لو رفتن با `/revoke` در BotFather باطلش کنید.
+4. ارسال فقط روی شبکهٔ **BEP20 (BSC)**؛ شبکهٔ اشتباه = از دست رفتن دارایی.
+5. برای برداشت/انتقال بعدی به مقدار کمی **BNB** برای کارمزد نیاز است.
 
 ## ساخت کیف پول جدید (اختیاری)
 
@@ -50,18 +55,5 @@ python -c "import config, wallet; print(config.WALLET_ADDRESS)"
 pip install -r requirements-dev.txt
 python scripts/generate_wallet.py              # فقط چاپ می‌کند
 python scripts/generate_wallet.py --write-env  # .env را با کیف جدید می‌سازد
-# سپس آدرس جدید را در config.py → WALLET_ADDRESS جایگزین کنید
-```
-
-## ساختار
-
-```
-bot/
-├── bot.py                     # ربات (polling) و هندلرهای دستورات
-├── wallet.py                  # خواندن موجودی از RPC بایننس (JSON-RPC خام)
-├── config.py                  # آدرس کیف پول (عمومی) + خواندن .env
-├── requirements.txt           # وابستگی‌های اجرا
-├── requirements-dev.txt       # + ابزار ساخت کیف پول
-├── scripts/generate_wallet.py # ساخت کیف پول تازه
-└── .env.example               # الگوی تنظیمات
+# سپس WALLET_ADDRESS را داخل otaku_hot_wallet_bot.py جایگزین کنید
 ```
