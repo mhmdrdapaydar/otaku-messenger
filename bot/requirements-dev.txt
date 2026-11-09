@@ -1,0 +1,4 @@
+# فقط برای ساخت کیف پول جدید (scripts/generate_wallet.py)
+-r requirements.txt
+mnemonic>=0.20
+eth-account>=0.11
